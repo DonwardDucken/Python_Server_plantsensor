@@ -25,13 +25,6 @@ def initDatabase():
         )
     """)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS sensors_esp(
-            MAC TEXT,
-            name REAL
-        )
-    """)
-
     con.commit()
     con.close()
 
@@ -127,109 +120,6 @@ def getSensorHistory(mac, limit=50):
 
     return history
 
-def getPlants():
-    con = sqlite3.connect('MonitorPflanzendaten.db')
-    cur = con.cursor()
-
-    rows = cur.execute("""
-        SELECT plant_name, species_id, room,
-               MAC, image_uri,
-               last_watered
-            
-        FROM Data_sensor
-    """).fetchall()
-
-    con.close()
-
-    plants = []
-
-    for row in rows:
-        plants.append({
-            "plant_name": row[0],
-            "species_id": row[1],
-            "room": row[2],
-            "MAC": row[3],
-            "image_uri": row[4],
-            "last_watered": row[5],
-        })
-
-    return plants
-
-def addPlant(data):
-
-    con = sqlite3.connect('MonitorPflanzendaten.db')
-    cur = con.cursor()
-
-    cur.execute("""
-        INSERT INTO Data_sensor(
-            plant_name,
-            species_id,
-            room,
-            MAC,
-            image_uri,
-            last_watered
-            
-        )
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (
-        data["plant_name"],
-        data["species_id"],
-        data["room"],
-        data["MAC"],
-        data.get("image_uri", None),
-        data["last_watered"],
-
-    ))
-
-    con.commit()
-    con.close()
-
-def get_sensor_adress():
-
-    con = sqlite3.connect(DATABASE_NAME)
-    cur = con.cursor()
-
-    rows = cur.execute("""
-        SELECT mac, name
-        FROM sensors s1
-        WHERE NOT EXISTS(
-        SELECT mac 
-        FROM sensors_esp s2
-        Where s1.mac=s2.mac);
-    """).fetchall()
-
-    con.close()
-
-    new_sensors = []
-
-    for row in rows: 
-        
-        new_sensors.append({
-            "mac":row[0],
-            "name":row[1]
-        })
-
-    return new_sensors
-
-
-def updatedb():
-    con = sqlite3.connect(DATABASE_NAME)
-    cur = con.cursor()
-
-    cur.execute("""
-        INSERT INTO sensors_esp (mac, name)
-        SELECT s1.mac, s1.name
-        FROM sensors s1
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM sensors_esp s2
-            WHERE s1.mac = s2.mac
-        )
-    """)
-    con.commit()
-    con.close()
-
-
 
 class SimpleHandler(SimpleHTTPRequestHandler):
 
@@ -238,19 +128,7 @@ class SimpleHandler(SimpleHTTPRequestHandler):
 
         content_length = int(self.headers["Content-Length"])
         raw_data = self.rfile.read(content_length)
-        if self.path == "/add_plant":
 
-            data = json.loads(raw_data)
-
-            addPlant(data)
-
-            self.send_response(200)
-            self.end_headers()
-
-            self.wfile.write(b"Plant added")
-
-            return
-        
         print("\nRaw Data:", raw_data)
 
         try:
@@ -261,13 +139,11 @@ class SimpleHandler(SimpleHTTPRequestHandler):
             print(data)
 
             saveData(data)
-            new_sensors= str(get_sensor_adress())
+
             self.send_response(200)
-            self.send_header("Content-Length", len(new_sensors))
             self.end_headers()
 
-            self.wfile.write(bytes(new_sensors, "utf8"))
-            updatedb()
+            self.wfile.write(b"JSON OK")
 
         except json.JSONDecodeError:
 
@@ -336,8 +212,6 @@ class SimpleHandler(SimpleHTTPRequestHandler):
 
             history = getSensorHistory(mac)
 
-            
-
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -345,15 +219,7 @@ class SimpleHandler(SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(history).encode())
 
             return
-        if parsed_path.path == "/plants":
 
-            data = getPlants()
-
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-
-            self.wfile.write(json.dumps(data).encode())
         self.send_response(404)
         self.end_headers()
 
