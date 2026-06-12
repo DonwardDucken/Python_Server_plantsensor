@@ -25,6 +25,13 @@ def initDatabase():
         )
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS sensors_esp(
+            MAC TEXT,
+            name REAL
+        )
+    """)
+
     con.commit()
     con.close()
 
@@ -186,7 +193,7 @@ class SimpleHandler(SimpleHTTPRequestHandler):
             print(data)
 
             saveData(data)
-            new_sensors= json.dumps(get_sensor_adress())
+            new_sensors= str(get_sensor_adress())
             self.send_response(200)
             self.send_header("Content-Length", len(new_sensors))
             self.end_headers()
