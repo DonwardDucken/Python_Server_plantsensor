@@ -121,53 +121,6 @@ def getSensorHistory(mac, limit=50):
     return history
 
 
-def get_sensor_adress():
-
-    con = sqlite3.connect(DATABASE_NAME)
-    cur = con.cursor()
-
-    rows = cur.execute("""
-        SELECT mac, name
-        FROM sensors s1
-        WHERE NOT EXISTS(
-        SELECT mac 
-        FROM sensors_esp s2
-        Where s1.mac=s2.mac);
-    """).fetchall()
-
-    con.close()
-
-    new_sensors = []
-
-    for row in rows: 
-        
-        new_sensors.append({
-            "mac":row[0],
-            "name":row[1]
-        })
-
-    return new_sensors
-
-
-def updatedb():
-    con = sqlite3.connect(DATABASE_NAME)
-    cur = con.cursor()
-
-    cur.execute("""
-        INSERT INTO sensors_esp (mac, name)
-        SELECT s1.mac, s1.name
-        FROM sensors s1
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM sensors_esp s2
-            WHERE s1.mac = s2.mac
-        )
-    """)
-    con.commit()
-    con.close()
-
-
-
 class SimpleHandler(SimpleHTTPRequestHandler):
 
 
@@ -186,12 +139,11 @@ class SimpleHandler(SimpleHTTPRequestHandler):
             print(data)
 
             saveData(data)
-            new_sensors= json.dumps(get_sensor_adress())
+
             self.send_response(200)
             self.end_headers()
 
-            self.wfile.write(new_sensors)
-            updatedb()
+            self.wfile.write(b"JSON OK")
 
         except json.JSONDecodeError:
 
@@ -259,8 +211,6 @@ class SimpleHandler(SimpleHTTPRequestHandler):
                 return
 
             history = getSensorHistory(mac)
-
-            
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
