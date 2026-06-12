@@ -120,6 +120,62 @@ def getSensorHistory(mac, limit=50):
 
     return history
 
+def getPlants():
+    con = sqlite3.connect('MonitorPflanzendaten.db')
+    cur = con.cursor()
+
+    rows = cur.execute("""
+        SELECT plant_name, species_id, room,
+               MAC, image_uri,
+               last_watered
+            
+        FROM Data_sensor
+    """).fetchall()
+
+    con.close()
+
+    plants = []
+
+    for row in rows:
+        plants.append({
+            "plant_name": row[0],
+            "species_id": row[1],
+            "room": row[2],
+            "MAC": row[3],
+            "image_uri": row[4],
+            "last_watered": row[5],
+        })
+
+    return plants
+
+def addPlant(data):
+
+    con = sqlite3.connect('MonitorPflanzendaten.db')
+    cur = con.cursor()
+
+    cur.execute("""
+        INSERT INTO Data_sensor(
+            plant_name,
+            species_id,
+            room,
+            MAC,
+            image_uri,
+            last_watered
+            
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        data["plant_name"],
+        data["species_id"],
+        data["room"],
+        data["MAC"],
+        data.get("image_uri", None),
+        data["last_watered"],
+
+    ))
+
+    con.commit()
+    con.close()
 
 class SimpleHandler(SimpleHTTPRequestHandler):
 
@@ -128,7 +184,19 @@ class SimpleHandler(SimpleHTTPRequestHandler):
 
         content_length = int(self.headers["Content-Length"])
         raw_data = self.rfile.read(content_length)
+        if self.path == "/add_plant":
 
+            data = json.loads(raw_data)
+
+            addPlant(data)
+
+            self.send_response(200)
+            self.end_headers()
+
+            self.wfile.write(b"Plant added")
+
+            return
+        
         print("\nRaw Data:", raw_data)
 
         try:
@@ -219,7 +287,15 @@ class SimpleHandler(SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(history).encode())
 
             return
+        if parsed_path.path == "/plants":
 
+            data = getPlants()
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+
+            self.wfile.write(json.dumps(data).encode())
         self.send_response(404)
         self.end_headers()
 
