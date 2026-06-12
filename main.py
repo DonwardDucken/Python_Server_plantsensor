@@ -187,10 +187,11 @@ class SimpleHandler(SimpleHTTPRequestHandler):
 
             saveData(data)
             new_sensors= json.dumps(get_sensor_adress())
-            self.send_response(200,new_sensors)
+            self.send_response(200)
+            self.send_header("Content-Length", len(new_sensors))
             self.end_headers()
 
-            self.wfile.write(b"JSON OK")
+            self.wfile.write(bytes(new_sensors, "utf8"))
             updatedb()
 
         except json.JSONDecodeError:
