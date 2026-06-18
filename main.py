@@ -1,5 +1,5 @@
 import datetime
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 import json
 import sqlite3
 from urllib.parse import urlparse, parse_qs
@@ -11,6 +11,7 @@ def get_connection():
     return sqlite3.connect(DATABASE_NAME)
 
 
+    
 def initDatabase():
     con = get_connection()
     cur = con.cursor()
@@ -28,16 +29,17 @@ def initDatabase():
     """)
 
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS Data_sensor(
-            MAC TEXT,
-            Pflanzenname TEXT,
-            plant_name TEXT,
-            species_id TEXT,
-            room TEXT,
-            image_uri TEXT,
-            last_watered TEXT,
-            care_hints TEXT
-        )
+       CREATE TABLE IF NOT EXISTS Data_sensor(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    MAC TEXT,
+    Pflanzenname TEXT,
+    plant_name TEXT,
+    species_id TEXT,
+    room TEXT,
+    image_uri TEXT,
+    last_watered TEXT,
+    care_hints TEXT
+)
     """)
 
     cur.execute("""
@@ -193,7 +195,28 @@ def addPlant(data):
 
     con.commit()
     con.close()
+    
+def updatePlant(data):
+    con = sqlite3.connect(DATABASE_NAME)
+    cur = con.cursor()
 
+    cur.execute("""
+        UPDATE Data_sensor
+        SET
+            last_watered = COALESCE(?, last_watered),
+            image_uri = COALESCE(?, image_uri),
+            care_hints = COALESCE(?, care_hints)
+        WHERE id = ?
+    """, (
+        data.get("last_watered"),
+        data.get("image_uri"),
+        data.get("care_hints"),
+        data["id"]
+    ))
+
+    con.commit()
+    con.close()
+    
 def deletePlant(data):
     plant_id = data.get("id")
 
@@ -210,6 +233,65 @@ def deletePlant(data):
 
     con.commit()
     con.close()
+    
+def getPlantReference(pid):
+    con = sqlite3.connect(DATABASE_NAME)
+    con.row_factory = sqlite3.Row
+    cur = con.cursor()
+
+    row = cur.execute("""
+        SELECT *
+        FROM plant_references
+        WHERE pid = ?
+    """, (pid,)).fetchone()
+
+    con.close()
+    return dict(row) if row else None
+
+def searchPlants(search):
+    con = sqlite3.connect(DATABASE_NAME)
+    con.row_factory = sqlite3.Row
+    cur = con.cursor()
+
+    rows = cur.execute("""
+        SELECT pid, display_pid, category
+        FROM plant_references
+        WHERE lower(display_pid) LIKE lower(?)
+        LIMIT 50
+    """, (f"%{search}%",)).fetchall()
+
+    con.close()
+
+    return [dict(row) for row in rows]
+
+def getAllPlantReferences():
+    con = sqlite3.connect(DATABASE_NAME)
+    con.row_factory = sqlite3.Row
+    cur = con.cursor()
+
+    rows = cur.execute("""
+        SELECT pid, display_pid, alias, image, category
+        FROM plant_references
+        ORDER BY display_pid
+    """).fetchall()
+
+    con.close()
+    return [dict(row) for row in rows]
+
+def getPlantReferencesPage(limit=10, offset=0):
+    con = sqlite3.connect(DATABASE_NAME)
+    con.row_factory = sqlite3.Row
+    cur = con.cursor()
+
+    rows = cur.execute("""
+        SELECT pid, display_pid, alias, image, category
+        FROM plant_references
+        ORDER BY display_pid
+        LIMIT ? OFFSET ?
+    """, (limit, offset)).fetchall()
+
+    con.close()
+    return [dict(row) for row in rows]
 
 def getNewSensors():
     con = get_connection()
@@ -253,22 +335,25 @@ def updateSensorsEsp():
 class SimpleHandler(SimpleHTTPRequestHandler):
 
     def send_json(self, data, status=200):
-        response = json.dumps(data).encode("utf-8")
+        response = json.dumps(data, ensure_ascii=False).encode("utf-8") + b"\n"
 
         self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(response)))
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(response)
+        self.wfile.flush()
 
     def send_text(self, text, status=200):
         response = text.encode("utf-8")
 
         self.send_response(status)
-        self.send_header("Content-Type", "text/plain")
-        self.send_header("Content-Length", str(len(response)))
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Connection", "close")
         self.end_headers()
+
         self.wfile.write(response)
+        self.wfile.flush()
 
     def do_POST(self):
         try:
@@ -291,7 +376,19 @@ class SimpleHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(b"Plant deleted")
 
                 return
+            
+            if self.path == "/update_plant":
 
+                data = json.loads(raw_data)
+
+                updatePlant(data)
+
+                self.send_response(200)
+                self.end_headers()
+
+                self.wfile.write(b"Plant updated")
+
+                return
             saveData(data)
 
             new_sensors = getNewSensors()
@@ -314,14 +411,13 @@ class SimpleHandler(SimpleHTTPRequestHandler):
         query = parse_qs(parsed_path.query)
 
         if parsed_path.path == "/plants":
-            data = getPlants()
+            plants = getPlants()
 
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
+            print("=== PLANTS ===")
+            print(json.dumps(plants, indent=2))
+            print("==============")
 
-            self.wfile.write(json.dumps(data).encode())
-
+            self.send_json(plants)
             return
 
         if parsed_path.path == "/sensor":
@@ -354,12 +450,49 @@ class SimpleHandler(SimpleHTTPRequestHandler):
         if parsed_path.path == "/new_sensors":
             self.send_json(getNewSensors())
             return
+        
+        if parsed_path.path == "/plant_references":
+            self.send_json(getAllPlantReferences())
+            return
+        
+        if parsed_path.path == "/plant_reference":
+            pid = query.get("pid", [None])[0]
 
+            if not pid:
+                self.send_text("Missing pid", 400)
+                return
+
+            data = getPlantReference(pid)
+
+            if data:
+                self.send_json(data)
+            else:
+                self.send_text("Reference not found", 404)
+
+            return
+        if parsed_path.path == "/search_plants":
+
+            search = query.get("q", [""])[0]
+
+            self.send_json(searchPlants(search))
+            return
+        
+        if parsed_path.path == "/plant_references_page":
+            limit = int(query.get("limit", [10])[0])
+            offset = int(query.get("offset", [0])[0])
+
+            data = getPlantReferencesPage(limit, offset)
+            print("Page:", offset, "Rows:", len(data))
+
+            self.send_json(data)
+            return
+        
         self.send_text("Endpoint not found", 404)
+        
 
 
 def startServer():
-    server = HTTPServer(("0.0.0.0", 8080), SimpleHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", 8080), SimpleHandler)
     print("Server läuft auf Port 8080...")
     server.serve_forever()
 
