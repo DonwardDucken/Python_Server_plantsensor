@@ -303,15 +303,18 @@ def getAllSensors():
     """).fetchall()
 
     con.close()
-
-    return [
-        {
-            "mac": row[0]
-            
-        }
+   
+    mac_list = [
+        {"mac": row[0]}
         for row in rows
     ]
 
+
+    return{   
+            "maccount": len(rows),
+            "mac": mac_list       
+        }
+        
 
 class SimpleHandler(SimpleHTTPRequestHandler):
 
