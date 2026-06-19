@@ -293,43 +293,24 @@ def getPlantReferencesPage(limit=10, offset=0):
     con.close()
     return [dict(row) for row in rows]
 
-def getNewSensors():
+def getAllSensors():
     con = get_connection()
     cur = con.cursor()
 
     rows = cur.execute("""
-        SELECT s1.mac, s1.name
-        FROM sensors s1
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM sensors_esp s2
-            WHERE s1.mac = s2.mac
-        )
+        SELECT mac
+        FROM Data_sensor
     """).fetchall()
 
     con.close()
 
     return [
         {
-            "mac": row[0],
-            "name": row[1]
+            "mac": row[0]
+            
         }
         for row in rows
     ]
-
-
-def updateSensorsEsp():
-    con = get_connection()
-    cur = con.cursor()
-
-    cur.execute("""
-        INSERT OR IGNORE INTO sensors_esp(mac, name)
-        SELECT mac, name
-        FROM sensors
-    """)
-
-    con.commit()
-    con.close()
 
 
 class SimpleHandler(SimpleHTTPRequestHandler):
@@ -389,14 +370,15 @@ class SimpleHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(b"Plant updated")
 
                 return
+            
             saveData(data)
 
-            new_sensors = getNewSensors()
-            updateSensorsEsp()
+            all_sensors = getAllSensors()
+            
 
             self.send_json({
                 "status": "ok",
-                "new_sensors": new_sensors
+                "all_sensors": all_sensors
             })
 
         except json.JSONDecodeError:
@@ -448,7 +430,7 @@ class SimpleHandler(SimpleHTTPRequestHandler):
             return
 
         if parsed_path.path == "/new_sensors":
-            self.send_json(getNewSensors())
+            self.send_json(getAllSensors())
             return
         
         if parsed_path.path == "/plant_references":
