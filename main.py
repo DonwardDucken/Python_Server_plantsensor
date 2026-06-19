@@ -6,12 +6,9 @@ from urllib.parse import urlparse, parse_qs
 
 DATABASE_NAME = "MonitorPflanzendaten.db"
 
-
 def get_connection():
     return sqlite3.connect(DATABASE_NAME)
 
-
-    
 def initDatabase():
     con = get_connection()
     cur = con.cursor()
@@ -86,7 +83,6 @@ def saveData(data):
     con.commit()
     con.close()
 
-
 def getLatestSensorData(mac):
     con = get_connection()
     cur = con.cursor()
@@ -112,7 +108,6 @@ def getLatestSensorData(mac):
         "timestamp": row[4]
     }
 
-
 def getSensorHistory(mac, limit=50):
     con = get_connection()
     cur = con.cursor()
@@ -137,7 +132,6 @@ def getSensorHistory(mac, limit=50):
         }
         for row in rows
     ]
-
 
 def getPlants():
     con = sqlite3.connect(DATABASE_NAME)
@@ -166,7 +160,6 @@ def getPlants():
         })
 
     return plants
-
 
 def addPlant(data):
     con = sqlite3.connect(DATABASE_NAME)
@@ -304,18 +297,13 @@ def getAllSensors():
 
     con.close()
    
-    mac_list = [
-        {"mac": row[0]}
-        for row in rows
-    ]
-
-
-    return{   
-            "maccount": len(rows),
-            "mac": mac_list       
-        }
+    return {
+        "macs": [
+            {"mac": row[0]}
+            for row in rows
+        ]
+    }
         
-
 class SimpleHandler(SimpleHTTPRequestHandler):
 
     def send_json(self, data, status=200):
