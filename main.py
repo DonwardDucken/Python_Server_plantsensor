@@ -11,8 +11,14 @@ DATABASE_NAME = "MonitorPflanzendaten.db"
 def get_connection():
     return sqlite3.connect(DATABASE_NAME)
 
+<<<<<<< HEAD
 #Create the required database tables if they do not already exist 
+=======
+
+
+>>>>>>> 5de5c36d14ee2f21d1f54fc607ed3892b5d8967e
 def initDatabase():
+    print("Datenbank wird initialisiert...")
     con = get_connection()
     cur = con.cursor()
 
@@ -202,7 +208,10 @@ def addPlant(data):
     con.commit()
     con.close()
 
+<<<<<<< HEAD
 #Update editable plant information in the database
+=======
+>>>>>>> 5de5c36d14ee2f21d1f54fc607ed3892b5d8967e
 def updatePlant(data):
     con = sqlite3.connect(DATABASE_NAME)
     cur = con.cursor()
@@ -224,8 +233,11 @@ def updatePlant(data):
     con.commit()
     con.close()
 
+<<<<<<< HEAD
 
 #Remove a plant from the database by its ID
+=======
+>>>>>>> 5de5c36d14ee2f21d1f54fc607ed3892b5d8967e
 def deletePlant(data):
     plant_id = data.get("id")
 
@@ -242,8 +254,12 @@ def deletePlant(data):
 
     con.commit()
     con.close()
+<<<<<<< HEAD
     
 #Retrieve plant reference data and care information
+=======
+
+>>>>>>> 5de5c36d14ee2f21d1f54fc607ed3892b5d8967e
 def getPlantReference(pid):
     con = sqlite3.connect(DATABASE_NAME)
     con.row_factory = sqlite3.Row
@@ -318,6 +334,7 @@ def getAllSensors():
     """).fetchall()
 
     con.close()
+<<<<<<< HEAD
    
     return {
         "macs": [
@@ -329,6 +346,21 @@ def getAllSensors():
 #=======================
 #HTTP Server Handler
 #=======================
+=======
+
+    mac_list = [
+        {"mac": row[0]}
+        for row in rows
+    ]
+
+
+    return{
+            "maccount": len(rows),
+            "mac": mac_list
+        }
+
+
+>>>>>>> 5de5c36d14ee2f21d1f54fc607ed3892b5d8967e
 class SimpleHandler(SimpleHTTPRequestHandler):
 
     #Helper function for sending JSON responses
@@ -339,6 +371,7 @@ class SimpleHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Connection", "close")
         self.end_headers()
+        print("JSON:", response)
         self.wfile.write(response)
         self.wfile.flush()
 
@@ -377,7 +410,7 @@ class SimpleHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(b"Plant deleted")
 
                 return
-            
+
             if self.path == "/update_plant":
 
                 data = json.loads(raw_data)
@@ -390,11 +423,11 @@ class SimpleHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(b"Plant updated")
 
                 return
-            
+
             saveData(data)
 
             all_sensors = getAllSensors()
-            
+
 
             self.send_json({
                 "status": "ok",
@@ -453,11 +486,11 @@ class SimpleHandler(SimpleHTTPRequestHandler):
         if parsed_path.path == "/new_sensors":
             self.send_json(getAllSensors())
             return
-        
+
         if parsed_path.path == "/plant_references":
             self.send_json(getAllPlantReferences())
             return
-        
+
         if parsed_path.path == "/plant_reference":
             pid = query.get("pid", [None])[0]
 
@@ -479,7 +512,7 @@ class SimpleHandler(SimpleHTTPRequestHandler):
 
             self.send_json(searchPlants(search))
             return
-        
+
         if parsed_path.path == "/plant_references_page":
             limit = int(query.get("limit", [10])[0])
             offset = int(query.get("offset", [0])[0])
@@ -489,9 +522,9 @@ class SimpleHandler(SimpleHTTPRequestHandler):
 
             self.send_json(data)
             return
-        
+
         self.send_text("Endpoint not found", 404)
-        
+
 
 #Start Multi-Threaded HTTP Server
 def startServer():
