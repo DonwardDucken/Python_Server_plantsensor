@@ -1,25 +1,38 @@
 #include <BLEDevice.h>
 #include <WiFi.h>
 #include "config.h"
-#include "SPI.h"
-#include <WiFiUdp.h>
-#include <ESPAsyncWebServer.h>
+#include "sensorStore.h"
 #include "sendData.h"
 
-RTC_DATA_ATTR int bootCount = 0;
-static int deviceCount = sizeof FLORA_DEVICES / sizeof FLORA_DEVICES[0];
-
+// ─── BLE Service / Characteristic UUIDs (Xiaomi Flora) ─────────────────
 static BLEUUID serviceUUID("00001204-0000-1000-8000-00805f9b34fb");
-static BLEUUID uuid_version_battery("00001a02-0000-1000-8000-00805f9b34fb");
-static BLEUUID uuid_sensor_data("00001a01-0000-1000-8000-00805f9b34fb");
-static BLEUUID uuid_write_mode("00001a00-0000-1000-8000-00805f9b34fb");
+static BLEUUID uuidWriteMode("00001a00-0000-1000-8000-00805f9b34fb");
+static BLEUUID uuidSensorData("00001a01-0000-1000-8000-00805f9b34fb");
 
+// Boot-Zaehler ueberlebt den Deep Sleep
+RTC_DATA_ATTR int bootCount = 0;
+
+// Watchdog-Task: erzwingt Schlaf, falls ein Lauf haengen bleibt
 TaskHandle_t hibernateTaskHandle = NULL;
+
 WiFiClient espClient;
 
+// ─── Deep Sleep ────────────────────────────────────────────────────────
+void hibernate() {
+  esp_sleep_enable_timer_wakeup(SLEEP_DURATION * 1000000ULL);
+  Serial.println("Going to sleep now.");
+  delay(100);
+  esp_deep_sleep_start();
+}
+
+void delayedHibernate(void* parameter) {
+  delay(EMERGENCY_HIBERNATE * 1000);
+  Serial.println("Emergency hibernate!");
+  hibernate();
+}
+
+// ─── WiFi ────────────────────────────────────────────────────────────────
 void connectWifi() {
-  //Serial.printf("local_ip: %s, Gateway: %s, Subnet: %s", local_IP.toString(), gateway.toString(), subnet.toString());
-  //WiFi.config(local_IP, gateway, subnet); //-> DHCP
   Serial.println("Connecting to WiFi...");
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
@@ -34,52 +47,55 @@ void disconnectWifi() {
   Serial.println("WiFi disconnected");
 }
 
-BLEClient* getFloraClient(BLEAddress floraAddress) {
-  BLEClient* floraClient = BLEDevice::createClient();
-  if (!floraClient->connect(floraAddress)) {
+// ─── BLE ─────────────────────────────────────────────────────────────────
+BLEClient* getFloraClient(BLEAddress address) {
+  BLEClient* client = BLEDevice::createClient();
+  if (!client->connect(address)) {
     Serial.println("- Connection failed, skipping");
     return nullptr;
   }
   Serial.println("- Connection successful");
-  return floraClient;
+  return client;
 }
 
-BLERemoteService* getFloraService(BLEClient* floraClient) {
-  BLERemoteService* floraService = nullptr;
+BLERemoteService* getFloraService(BLEClient* client) {
+  BLERemoteService* service = nullptr;
   try {
-    floraService = floraClient->getService(serviceUUID);
+    service = client->getService(serviceUUID);
   } catch (...) {}
-  if (floraService == nullptr) {
+  if (service == nullptr) {
     Serial.println("- Failed to find data service");
   } else {
     Serial.println("- Found data service");
   }
-  return floraService;
+  return service;
 }
 
-bool forceFloraServiceDataMode(BLERemoteService* floraService) {
-  BLERemoteCharacteristic* floraCharacteristic = nullptr;
+// Versetzt den Sensor in den Daten-Modus (sonst nur Echtzeit-Flags lesbar).
+bool forceDataMode(BLERemoteService* service) {
   Serial.println("- Force device in data mode");
+  BLERemoteCharacteristic* characteristic = nullptr;
   try {
-    floraCharacteristic = floraService->getCharacteristic(uuid_write_mode);
+    characteristic = service->getCharacteristic(uuidWriteMode);
   } catch (...) {}
-  if (floraCharacteristic == nullptr) {
+  if (characteristic == nullptr) {
     Serial.println("-- Failed, skipping device");
     return false;
   }
-  uint8_t buf[2] = { 0xA0, 0x1F };
-  floraCharacteristic->writeValue(buf, 2, true);
+  uint8_t cmd[2] = { 0xA0, 0x1F };
+  characteristic->writeValue(cmd, sizeof(cmd), true);
   delay(500);
   return true;
 }
 
-bool readFloraDataCharacteristic(BLERemoteService* floraService, char* deviceMacAddress) {
-  BLERemoteCharacteristic* floraCharacteristic = nullptr;
+// Liest die Sensordaten-Characteristic, parst sie und sendet sie an den Server.
+bool readSensorData(BLERemoteService* service, const char* mac) {
   Serial.println("- Access characteristic from device");
+  BLERemoteCharacteristic* characteristic = nullptr;
   try {
-    floraCharacteristic = floraService->getCharacteristic(uuid_sensor_data);
+    characteristic = service->getCharacteristic(uuidSensorData);
   } catch (...) {}
-  if (floraCharacteristic == nullptr) {
+  if (characteristic == nullptr) {
     Serial.println("-- Failed, skipping device");
     return false;
   }
@@ -87,9 +103,9 @@ bool readFloraDataCharacteristic(BLERemoteService* floraService, char* deviceMac
   Serial.println("- Read value from characteristic");
   String value;
   try {
-    value = floraCharacteristic->readValue();
+    value = characteristic->readValue();
   } catch (...) {
-    Serial.println("-- Failed, skipping device");
+    Serial.println("-- Read failed, skipping device");
     return false;
   }
 
@@ -98,101 +114,51 @@ bool readFloraDataCharacteristic(BLERemoteService* floraService, char* deviceMac
     return false;
   }
 
-  // Byte-Zugriff per uint8_t cast
-  float temperature = (((uint8_t)value[1] << 8) | (uint8_t)value[0]) / 10.0;
-  int light = ((uint8_t)value[4] << 8) | (uint8_t)value[3];
-  int moisture = (uint8_t)value[7];
-  int conductivity = ((uint8_t)value[9] << 8) | (uint8_t)value[8];
+  // Byte-Layout der Flora-Sensordaten (Little-Endian)
+  float temperature  = (((uint8_t)value[1] << 8) | (uint8_t)value[0]) / 10.0f;
+  int   light        =  ((uint8_t)value[4] << 8) | (uint8_t)value[3];
+  int   moisture     =   (uint8_t)value[7];
+  int   conductivity =  ((uint8_t)value[9] << 8) | (uint8_t)value[8];
 
   Serial.printf("Temp: %.1f°C  Licht: %d lux  Feuchte: %d%%  Leitf.: %d µS/cm\n",
                 temperature, light, moisture, conductivity);
 
+  // Plausibilitaetspruefung gegen korrupte BLE-Reads
   if (temperature > 200 || temperature < -30 || conductivity > 3000) {
     Serial.println("-- Unreasonable values, skip publish");
     return false;
   }
 
-  postToServer(temperature, light, moisture, conductivity, deviceMacAddress, espClient);
-
+  postToServer(espClient, mac, temperature, light, moisture, conductivity);
   return true;
 }
-/*
-bool readFloraBatteryCharacteristic(BLERemoteService* floraService) {
-  BLERemoteCharacteristic* floraCharacteristic = nullptr;
-  Serial.println("- Access battery characteristic from device");
-  try {
-    floraCharacteristic = floraService->getCharacteristic(uuid_version_battery);
-  } catch (...) {}
-  if (floraCharacteristic == nullptr) {
-    Serial.println("-- Failed, skipping battery level");
-    return false;
+
+// Verbindet, liest und trennt einen einzelnen Sensor.
+bool processFloraDevice(BLEAddress address, const char* mac, int tryCount) {
+  Serial.printf("Processing Flora at %s (try %d)\n", address.toString().c_str(), tryCount);
+
+  BLEClient* client = getFloraClient(address);
+  if (client == nullptr) return false;
+
+  BLERemoteService* service = getFloraService(client);
+  bool success = false;
+  if (service != nullptr && forceDataMode(service)) {
+    success = readSensorData(service, mac);
   }
 
-  Serial.println("- Read value from characteristic");
-  String value;  // <-- HIER: ausserhalb try, kein Scope-Bug
-  try {
-    value = floraCharacteristic->readValue();
-  } catch (...) {
-    Serial.println("-- Failed, skipping battery level");
-    return false;
-  }
-
-  if (value.length() < 1) {
-    Serial.println("-- Too short");
-    return false;
-  }
-
-  int battery = (uint8_t)value[0];
-  Serial.print("-- Battery: ");
-  Serial.println(battery);
-
-  char buffer[64];
-  snprintf(buffer, 64, "%d", battery);
-  return true;
-}*/
-
-bool processFloraService(BLERemoteService* floraService, char* deviceMacAddress, bool readBattery) {
-  if (!forceFloraServiceDataMode(floraService)) return false;
-
-  bool dataSuccess = readFloraDataCharacteristic(floraService, deviceMacAddress);
-  bool batterySuccess = true;
-  /*if (readBattery) {
-    batterySuccess = readFloraBatteryCharacteristic(floraService);
-  }*/
-  return dataSuccess && batterySuccess;
-}
-
-bool processFloraDevice(BLEAddress floraAddress, char* deviceMacAddress, bool getBattery, int tryCount) {
-  Serial.printf("Processing Flora at %s (try %d)\n", floraAddress.toString().c_str(), tryCount);
-  BLEClient* floraClient = getFloraClient(floraAddress);
-  if (floraClient == nullptr) return false;
-  BLERemoteService* floraService = getFloraService(floraClient);
-  if (floraService == nullptr) {
-    floraClient->disconnect();
-    return false;
-  }
-  bool success = processFloraService(floraService, deviceMacAddress, getBattery);
-  floraClient->disconnect();
+  client->disconnect();
+  
   return success;
 }
 
-void hibernate() {
-  esp_sleep_enable_timer_wakeup(SLEEP_DURATION * 1000000ll);
-  Serial.println("Going to sleep now.");
-  delay(100);
-  esp_deep_sleep_start();
-}
-
-void delayedHibernate(void* parameter) {
-  delay(EMERGENCY_HIBERNATE * 1000);
-  Serial.println("Emergency hibernate!");
-  hibernate();
-}
-
+// ─── Setup / Loop ────────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
   delay(1000);
   bootCount++;
+  Serial.printf("Boot #%d\n", bootCount);
+
+  // Watchdog starten, der einen haengenden Lauf hart beendet
   xTaskCreate(delayedHibernate, "hibernate", 4096, NULL, 1, &hibernateTaskHandle);
 
   Serial.println("Initialize BLE client...");
@@ -200,29 +166,27 @@ void setup() {
   BLEDevice::setPower(ESP_PWR_LVL_P7);
 
   connectWifi();
-  
-  bool readBattery = ((bootCount % BATTERY_INTERVAL) == 0);
+  loadSensors();
 
-  for (int i = 0; i < deviceCount; i++) {
-    int tryCount = 0;
-    char* deviceMacAddress = FLORA_DEVICES[i];
-    //postToServer(0,0,0,0,deviceMacAddress, espClient);
-    BLEAddress floraAddress(deviceMacAddress);
-    while (tryCount < RETRY) {
-      tryCount++;
-      if (processFloraDevice(floraAddress, deviceMacAddress, readBattery, tryCount)) {
+  for (size_t i = 0; i < sensorCount; i++) {
+    const char* mac = sensorMacs[i];
+    BLEAddress address(mac);
+    for (int tryCount = 1; tryCount <= RETRY; tryCount++) {
+      if (processFloraDevice(address, mac, tryCount)) {
         delay(1000);
         break;
       }
       delay(1000);
     }
     delay(1000);
-  };
+  }
+
   disconnectWifi();
   vTaskDelete(hibernateTaskHandle);
   hibernate();
 }
 
 void loop() {
+  // Wird nie erreicht: setup() endet immer im Deep Sleep.
   delay(10000);
 }
