@@ -11,12 +11,7 @@ DATABASE_NAME = "MonitorPflanzendaten.db"
 def get_connection():
     return sqlite3.connect(DATABASE_NAME)
 
-<<<<<<< HEAD
 #Create the required database tables if they do not already exist 
-=======
-
-
->>>>>>> 5de5c36d14ee2f21d1f54fc607ed3892b5d8967e
 def initDatabase():
     print("Datenbank wird initialisiert...")
     con = get_connection()
@@ -208,10 +203,7 @@ def addPlant(data):
     con.commit()
     con.close()
 
-<<<<<<< HEAD
 #Update editable plant information in the database
-=======
->>>>>>> 5de5c36d14ee2f21d1f54fc607ed3892b5d8967e
 def updatePlant(data):
     con = sqlite3.connect(DATABASE_NAME)
     cur = con.cursor()
@@ -233,11 +225,8 @@ def updatePlant(data):
     con.commit()
     con.close()
 
-<<<<<<< HEAD
 
 #Remove a plant from the database by its ID
-=======
->>>>>>> 5de5c36d14ee2f21d1f54fc607ed3892b5d8967e
 def deletePlant(data):
     plant_id = data.get("id")
 
@@ -254,12 +243,8 @@ def deletePlant(data):
 
     con.commit()
     con.close()
-<<<<<<< HEAD
     
 #Retrieve plant reference data and care information
-=======
-
->>>>>>> 5de5c36d14ee2f21d1f54fc607ed3892b5d8967e
 def getPlantReference(pid):
     con = sqlite3.connect(DATABASE_NAME)
     con.row_factory = sqlite3.Row
@@ -334,19 +319,6 @@ def getAllSensors():
     """).fetchall()
 
     con.close()
-<<<<<<< HEAD
-   
-    return {
-        "macs": [
-            {"mac": row[0]}
-            for row in rows
-        ]
-    }
-        
-#=======================
-#HTTP Server Handler
-#=======================
-=======
 
     mac_list = [
         {"mac": row[0]}
@@ -360,7 +332,6 @@ def getAllSensors():
         }
 
 
->>>>>>> 5de5c36d14ee2f21d1f54fc607ed3892b5d8967e
 class SimpleHandler(SimpleHTTPRequestHandler):
 
     #Helper function for sending JSON responses
