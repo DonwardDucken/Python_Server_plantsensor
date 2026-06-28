@@ -1,17 +1,17 @@
 import datetime
-from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 import json
 import sqlite3
+
 from urllib.parse import urlparse, parse_qs
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 DATABASE_NAME = "MonitorPflanzendaten.db"
 
-
+#Create a new connection to the SQLite database
 def get_connection():
     return sqlite3.connect(DATABASE_NAME)
 
-
-
+#Create the required database tables if they do not already exist 
 def initDatabase():
     print("Datenbank wird initialisiert...")
     con = get_connection()
@@ -62,7 +62,10 @@ def initDatabase():
     con.close()
     print("Datenbank bereit.")
 
-
+#Store incoming sensor measurements in the database
+#The timestamp is generated on the server instead of the ESP32.
+#Since the ESP32 has no reliable real-time clock by default,
+#this guarantees consistent and accurate timestamps for all sensor data.
 def saveData(data):
     con = get_connection()
     cur = con.cursor()
@@ -87,7 +90,8 @@ def saveData(data):
     con.commit()
     con.close()
 
-
+#Database query functions
+#Return the latest measurement for a specific sensor
 def getLatestSensorData(mac):
     con = get_connection()
     cur = con.cursor()
@@ -114,6 +118,7 @@ def getLatestSensorData(mac):
     }
 
 
+#Return the latest sensor measurements for historical visualization
 def getSensorHistory(mac, limit=50):
     con = get_connection()
     cur = con.cursor()
@@ -139,7 +144,7 @@ def getSensorHistory(mac, limit=50):
         for row in rows
     ]
 
-
+#Retrieve all registered plants from the database
 def getPlants():
     con = sqlite3.connect(DATABASE_NAME)
     cur = con.cursor()
@@ -169,6 +174,7 @@ def getPlants():
     return plants
 
 
+#Store a new plant together with its assigned sensor
 def addPlant(data):
     con = sqlite3.connect(DATABASE_NAME)
     cur = con.cursor()
@@ -197,6 +203,7 @@ def addPlant(data):
     con.commit()
     con.close()
 
+#Update editable plant information in the database
 def updatePlant(data):
     con = sqlite3.connect(DATABASE_NAME)
     cur = con.cursor()
@@ -218,6 +225,8 @@ def updatePlant(data):
     con.commit()
     con.close()
 
+
+#Remove a plant from the database by its ID
 def deletePlant(data):
     plant_id = data.get("id")
 
@@ -234,7 +243,8 @@ def deletePlant(data):
 
     con.commit()
     con.close()
-
+    
+#Retrieve plant reference data and care information
 def getPlantReference(pid):
     con = sqlite3.connect(DATABASE_NAME)
     con.row_factory = sqlite3.Row
@@ -249,6 +259,8 @@ def getPlantReference(pid):
     con.close()
     return dict(row) if row else None
 
+#Search plant reference data by name
+#Used by the frontend to provide plant suggestions during plant creation
 def searchPlants(search):
     con = sqlite3.connect(DATABASE_NAME)
     con.row_factory = sqlite3.Row
@@ -265,6 +277,7 @@ def searchPlants(search):
 
     return [dict(row) for row in rows]
 
+#Retrieve all available plant reference entries
 def getAllPlantReferences():
     con = sqlite3.connect(DATABASE_NAME)
     con.row_factory = sqlite3.Row
@@ -279,6 +292,7 @@ def getAllPlantReferences():
     con.close()
     return [dict(row) for row in rows]
 
+#Retrieve a paginated subset of the plant reference database
 def getPlantReferencesPage(limit=10, offset=0):
     con = sqlite3.connect(DATABASE_NAME)
     con.row_factory = sqlite3.Row
@@ -294,6 +308,7 @@ def getPlantReferencesPage(limit=10, offset=0):
     con.close()
     return [dict(row) for row in rows]
 
+#Retrieve all registered sensor MAC addresses
 def getAllSensors():
     con = get_connection()
     cur = con.cursor()
@@ -319,6 +334,7 @@ def getAllSensors():
 
 class SimpleHandler(SimpleHTTPRequestHandler):
 
+    #Helper function for sending JSON responses
     def send_json(self, data, status=200):
         response = json.dumps(data, ensure_ascii=False).encode("utf-8") + b"\n"
 
@@ -330,6 +346,7 @@ class SimpleHandler(SimpleHTTPRequestHandler):
         self.wfile.write(response)
         self.wfile.flush()
 
+    #Helper function for sending plain text responses
     def send_text(self, text, status=200):
         response = text.encode("utf-8")
 
@@ -341,6 +358,8 @@ class SimpleHandler(SimpleHTTPRequestHandler):
         self.wfile.write(response)
         self.wfile.flush()
 
+    #Handle incoming POST requests
+    #Checks the request path and routes the request to the corresponding handler.
     def do_POST(self):
         try:
             content_length = int(self.headers.get("Content-Length", 0))
@@ -393,6 +412,7 @@ class SimpleHandler(SimpleHTTPRequestHandler):
             print("Server error:", e)
             self.send_text(f"Server Error: {e}", 500)
 
+    #Handle incoming GET requests
     def do_GET(self):
         parsed_path = urlparse(self.path)
         query = parse_qs(parsed_path.query)
@@ -477,7 +497,7 @@ class SimpleHandler(SimpleHTTPRequestHandler):
         self.send_text("Endpoint not found", 404)
 
 
-
+#Start Multi-Threaded HTTP Server
 def startServer():
     server = ThreadingHTTPServer(("0.0.0.0", 8080), SimpleHandler)
     print("Server läuft auf Port 8080...")
