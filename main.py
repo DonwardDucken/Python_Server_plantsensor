@@ -178,6 +178,7 @@ def getPlants():
 def addPlant(data):
     con = sqlite3.connect(DATABASE_NAME)
     cur = con.cursor()
+    print("post",data)
 
     cur.execute("""
         INSERT INTO Data_sensor(
@@ -211,11 +212,15 @@ def updatePlant(data):
     cur.execute("""
         UPDATE Data_sensor
         SET
+            plant_name   = COALESCE(?, plant_name),
+            room         = COALESCE(?, room),
             last_watered = COALESCE(?, last_watered),
-            image_uri = COALESCE(?, image_uri),
-            care_hints = COALESCE(?, care_hints)
+            image_uri    = COALESCE(?, image_uri),
+            care_hints   = COALESCE(?, care_hints)
         WHERE id = ?
     """, (
+        data.get("plant_name"),
+        data.get("room"),
         data.get("last_watered"),
         data.get("image_uri"),
         data.get("care_hints"),
